@@ -67,8 +67,7 @@ app.post("/register", async (req, res) => {
 });
 
 app.post("/login", async (req, res) => {
-    const { username, email, password } = req.body; 
-
+    const { username, email, password } = req.body;
     db.get(
         "select * from users where username=? or email=?",
         [username, email],
@@ -76,7 +75,6 @@ app.post("/login", async (req, res) => {
             if (err || !user) {
                 return res.status(400).json({ error: err.message });
             }
-
             const isPasswordValid = await bcrypt.compare(
                 password,
                 user.password
@@ -84,13 +82,32 @@ app.post("/login", async (req, res) => {
             if (!isPasswordValid) {
                 return res.status(400).json({ message: "Неверный пароль" });
             }
-
-            const token = jwt.sign(
-                { id: user.id, username: user.username, role: user.roleid },
-                secret,
-                { expiresIn: "10m" }
+            db.get(
+                "select role from roles where id=?",
+                [user.roleid],
+                async (err, role) => {
+                    if (err) {
+                        return res.status(400).json({ error: err.message });
+                    }
+                    const token = jwt.sign(
+                        {
+                            id: user.id,
+                            username: user.username,
+                            role: role.role,
+                        },
+                        secret,
+                        { expiresIn: "10m" }
+                    );
+                    res.json({
+                        token,
+                        user: {
+                            id: user.id,
+                            username: user.username,
+                            role: role.role,
+                        },
+                    });
+                }
             );
-            res.json({ token });
         }
     );
 });
@@ -120,10 +137,37 @@ app.get("/books", authenticateToken, async (req, res) => {
     });
 });
 
-app.get('/', (req, res) => {
-  res.send('Hello World!')
-})
+app.post('/create', authenticateToken, async (req, res) => {
 
+    const { title, author, genre, description, image } = req.body;
+
+    if (req.user && req.user.role === 'admin') {
+        db.run(
+            "insert into images (image_path) values (?)",
+            [image],
+            function(err) {
+                if (err) {
+                    return res.status(400).json({ message: "Ошибка при добавлении изображения" });
+                }
+
+                const imageId = this.lastID;
+
+                db.run(
+                    "insert into books (title, author, genre, description, image_id) values (?, ?, ?, ?, ?)",
+                    [title, author, genre, description, imageId],
+                    function(err) {
+                        if (err) {
+                            return res.status(400).json({ message: "Ошибка при добавлении книги" });
+                        }
+                        res.status(201).json({ message: "Книга добавлена" });
+                    }
+                );
+            }
+        );
+    } else {
+        res.status(403).json({ message: "У вас нет прав для добавления книги" });
+    }
+});
 app.listen(port, () => 
     console.log(`Сервер запущен по адресу http://localhost:${port}`)
 );
