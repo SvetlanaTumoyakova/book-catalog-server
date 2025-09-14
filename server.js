@@ -147,7 +147,7 @@ app.post('/create', authenticateToken, async (req, res) => {
             [image],
             function(err) {
                 if (err) {
-                    return res.status(400).json({ message: "Ошибка при добавлении изображения" });
+                    return res.status(500).json({ message: "Ошибка при добавлении изображения" });
                 }
 
                 const imageId = this.lastID;
@@ -157,7 +157,7 @@ app.post('/create', authenticateToken, async (req, res) => {
                     [title, author, genre, description, imageId],
                     function(err) {
                         if (err) {
-                            return res.status(400).json({ message: "Ошибка при добавлении книги" });
+                            return res.status(500).json({ error: err.message });
                         }
                         res.status(201).json({ message: "Книга добавлена" });
                     }
@@ -168,6 +168,43 @@ app.post('/create', authenticateToken, async (req, res) => {
         res.status(403).json({ message: "У вас нет прав для добавления книги" });
     }
 });
+
+app.put('/edit/:id', authenticateToken, async (req, res) => {
+    const bookId = req.params.id;
+    const { title, author, genre, description, image } = req.body;
+
+    if (req.user && req.user.role === 'admin') {
+        if (!title || !author || !genre || !description || !image) {
+            return res.status(400).json({ message: "Все поля обязательны для заполнения" });
+        }
+
+        db.run(
+            "update images set image_path = ? where id = (select image_id from books where id = ?)",
+            [image, bookId],
+            function(err) {
+                if (err) {
+                    console.error("Ошибка при обновлении изображения:", err);
+                    return res.status(500).json({ message: "Ошибка при обновлении изображения" });
+                }
+
+                db.run(
+                    "update books set title = ?, author = ?, genre = ?, description = ? where id = ?",
+                    [title, author, genre, description, bookId],
+                    function(err) {
+                        if (err) {
+                            console.error("Ошибка при обновлении книги:", err);
+                            return res.status(500).json({ message: "Ошибка при обновлении книги" });
+                        }
+                        res.status(200).json({ message: "Книга обновлена" });
+                    }
+                );
+            }
+        );
+    } else {
+        res.status(403).json({ message: "У вас нет прав для редактирования данных книги" });
+    }
+});
+
 app.listen(port, () => 
     console.log(`Сервер запущен по адресу http://localhost:${port}`)
 );
