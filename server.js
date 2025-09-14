@@ -24,7 +24,7 @@ db.serialize(() => {
     db.run("insert or ignore into roles(role) values('admin')");
     db.run("insert or ignore into roles(role) values('user')");
     db.run(
-        "create table if not exists images(id integer primary key autoincrement, image_path text not null)"
+        "create table if not exists images(id integer primary key autoincrement, image_path text not null unique)"
     );
     db.run(
         "create table if not exists books(id integer primary key autoincrement, title text, author text, genre text, description text, image_id integer, foreign key(image_id) references images(id))"
@@ -138,32 +138,47 @@ app.get("/books", authenticateToken, async (req, res) => {
 });
 
 app.post('/create', authenticateToken, async (req, res) => {
-
     const { title, author, genre, description, image } = req.body;
 
     if (req.user && req.user.role === 'admin') {
-        db.run(
-            "insert into images (image_path) values (?)",
-            [image],
-            function(err) {
-                if (err) {
-                    return res.status(500).json({ message: "Ошибка при добавлении изображения" });
-                }
+        try {
+            // Проверка, существует ли изображение
+            const existingImage = await new Promise((resolve, reject) => {
+                db.get("SELECT id FROM images WHERE image_path = ?", [image], (err, row) => {
+                    if (err) return reject(err);
+                    resolve(row);
+                });
+            });
 
-                const imageId = this.lastID;
+            let imageId;
 
+            if (existingImage) {
+                imageId = existingImage.id;
+            } else {
+                imageId = await new Promise((resolve, reject) => {
+                    db.run("INSERT INTO images (image_path) VALUES (?)", [image], function(err) {
+                        if (err) return reject(err);
+                        resolve(this.lastID); 
+                    });
+                });
+            }
+
+            await new Promise((resolve, reject) => {
                 db.run(
-                    "insert into books (title, author, genre, description, image_id) values (?, ?, ?, ?, ?)",
+                    "INSERT INTO books (title, author, genre, description, image_id) VALUES (?, ?, ?, ?, ?)",
                     [title, author, genre, description, imageId],
                     function(err) {
-                        if (err) {
-                            return res.status(500).json({ error: err.message });
-                        }
-                        res.status(201).json({ message: "Книга добавлена" });
+                        if (err) return reject(err);
+                        resolve();
                     }
                 );
-            }
-        );
+            });
+
+            res.status(201).json({ message: "Книга добавлена" });
+        } catch (error) {
+            console.error("Ошибка при добавлении книги:", error);
+            res.status(500).json({ message: "Ошибка при добавлении книги" });
+        }
     } else {
         res.status(403).json({ message: "У вас нет прав для добавления книги" });
     }
@@ -178,30 +193,64 @@ app.put('/edit/:id', authenticateToken, async (req, res) => {
             return res.status(400).json({ message: "Все поля обязательны для заполнения" });
         }
 
-        db.run(
-            "update images set image_path = ? where id = (select image_id from books where id = ?)",
-            [image, bookId],
-            function(err) {
-                if (err) {
-                    console.error("Ошибка при обновлении изображения:", err);
-                    return res.status(500).json({ message: "Ошибка при обновлении изображения" });
-                }
+        try {
+            const existingImage = await new Promise((resolve, reject) => {
+                db.get("SELECT id FROM images WHERE image_path = ?", [image], (err, row) => {
+                    if (err) return reject(err);
+                    resolve(row);
+                });
+            });
 
+            let imageId;
+
+            if (existingImage) {
+                imageId = existingImage.id;
+            } else {
+                imageId = await new Promise((resolve, reject) => {
+                    db.run("INSERT INTO images (image_path) VALUES (?)", [image], function(err) {
+                        if (err) return reject(err);
+                        resolve(this.lastID);
+                    });
+                });
+            }
+
+            await new Promise((resolve, reject) => {
                 db.run(
-                    "update books set title = ?, author = ?, genre = ?, description = ? where id = ?",
-                    [title, author, genre, description, bookId],
+                    "UPDATE books SET title = ?, author = ?, genre = ?, description = ?, image_id = ? WHERE id = ?",
+                    [title, author, genre, description, imageId, bookId],
                     function(err) {
-                        if (err) {
-                            console.error("Ошибка при обновлении книги:", err);
-                            return res.status(500).json({ message: "Ошибка при обновлении книги" });
-                        }
-                        res.status(200).json({ message: "Книга обновлена" });
+                        if (err) return reject(err);
+                        resolve();
                     }
                 );
-            }
-        );
+            });
+
+            res.status(200).json({ message: "Книга обновлена" });
+        } catch (error) {
+            res.status(500).json({ message: "Ошибка при редактировании книги" });
+        }
     } else {
         res.status(403).json({ message: "У вас нет прав для редактирования данных книги" });
+    }
+});
+
+app.delete("/books/:id", authenticateToken, async (req, res) => {
+    if (req.user.role === "admin") {
+        const { id } = req.params;
+
+        db.run("DELETE FROM books WHERE id = ?", [id], function(err) {
+            if (err) {
+                return res.status(500).json({ error: err.message });
+            }
+
+            if (this.changes === 0) {
+                return res.status(404).json({ message: "Книга не найдена" });
+            }
+
+            return res.json({ message: "Книга удалена" });
+        });
+    } else {
+        return res.status(403).json({ message: "Доступ только для администраторов" });
     }
 });
 
