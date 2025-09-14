@@ -128,12 +128,31 @@ const authenticateToken = (req, res, next) => {
         next();
     })
 }
+
 app.get("/books", authenticateToken, async (req, res) => {
-    db.all("select * from books", (err, books) => {
+    db.all(
+        `SELECT books.title, books.author, images.image_path AS image 
+         FROM books 
+         LEFT JOIN images ON books.image_id = images.id`,
+        (err, books) => {
+            if (err) {
+                return res.status(500).json({ error: err.message });
+            }
+            return res.json(books);
+        }
+    );
+});
+app.get("/books/:id", authenticateToken, async (req, res) => {
+    const bookId = req.params.id;
+
+    db.get("select * from books where id = ?", [bookId], (err, book) => {
         if (err) {
             return res.status(500).json({ error: err.message });
         }
-        return res.json(books);
+        if (!book) {
+            return res.status(404).json({ message: "Книга не найдена" });
+        }
+        return res.json(book);
     });
 });
 
