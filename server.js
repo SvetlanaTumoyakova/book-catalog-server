@@ -5,7 +5,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
-const port = process.env.PORT || 5173;
+const port = process.env.PORT || 5174;
 const secret = process.env.SECRET_KEY || 'hjfgjhf';
 
 const app = express();
@@ -68,10 +68,16 @@ app.post("/register", async (req, res) => {
 
 app.post("/login", async (req, res) => {
     const { username, email, password } = req.body;
+
+    if (!username && !email) {
+    return res.status(400).json({ message: "Необходимо указать имя пользователя или email" });
+    }
+
     db.get(
         "select * from users where username=? or email=?",
         [username, email],
         async (err, user) => {
+            
             if (err || !user) {
                 return res.status(400).json({ error: err.message });
             }
@@ -142,6 +148,7 @@ app.get("/books", authenticateToken, async (req, res) => {
         }
     );
 });
+
 app.get("/books/:id", authenticateToken, async (req, res) => {
     const bookId = req.params.id;
 
@@ -269,7 +276,7 @@ app.delete("/books/:id", authenticateToken, async (req, res) => {
             return res.json({ message: "Книга удалена" });
         });
     } else {
-        return res.status(403).json({ message: "Доступ только для администраторов" });
+        return res.status(403).json({ message: "У вас нет прав для удаления данных книги" });
     }
 });
 
