@@ -11,6 +11,7 @@ const secret = process.env.SECRET_KEY || 'hjfgjhf';
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(express.static("uploads"));
 
 const db = new sqlite3.Database("./books.db");
 
@@ -102,7 +103,7 @@ app.post("/login", async (req, res) => {
                             role: role.role,
                         },
                         secret,
-                        { expiresIn: "10m" }
+                        { expiresIn: "60m" }
                     );
                     res.json({
                         token,
@@ -137,7 +138,7 @@ const authenticateToken = (req, res, next) => {
 
 app.get("/books", authenticateToken, async (req, res) => {
     db.all(
-        `SELECT books.title, books.author, images.image_path AS image 
+        `SELECT books.id, books.title, books.author, images.image_path AS image 
          FROM books 
          LEFT JOIN images ON books.image_id = images.id`,
         (err, books) => {
@@ -152,7 +153,10 @@ app.get("/books", authenticateToken, async (req, res) => {
 app.get("/books/:id", authenticateToken, async (req, res) => {
     const bookId = req.params.id;
 
-    db.get("select * from books where id = ?", [bookId], (err, book) => {
+    db.get(`SELECT books.id, books.title, books.author, books.description, books.genre, images.image_path AS image 
+         FROM books 
+         LEFT JOIN images ON books.image_id = images.id
+         where books.id = ?`, [bookId], (err, book) => {
         if (err) {
             return res.status(500).json({ error: err.message });
         }
@@ -168,7 +172,6 @@ app.post('/create', authenticateToken, async (req, res) => {
 
     if (req.user && req.user.role === 'admin') {
         try {
-            // Проверка, существует ли изображение
             const existingImage = await new Promise((resolve, reject) => {
                 db.get("SELECT id FROM images WHERE image_path = ?", [image], (err, row) => {
                     if (err) return reject(err);
@@ -189,18 +192,29 @@ app.post('/create', authenticateToken, async (req, res) => {
                 });
             }
 
-            await new Promise((resolve, reject) => {
+            const bookId = await new Promise((resolve, reject) => {
                 db.run(
                     "INSERT INTO books (title, author, genre, description, image_id) VALUES (?, ?, ?, ?, ?)",
                     [title, author, genre, description, imageId],
                     function(err) {
                         if (err) return reject(err);
-                        resolve();
+                        console.log(this);
+                        resolve(this.lastID);
                     }
                 );
             });
 
-            res.status(201).json({ message: "Книга добавлена" });
+            const book = await new Promise((resolve, reject) => {
+                db.get(`SELECT books.id, books.title, books.author, books.description, books.genre, images.image_path AS image 
+                FROM books 
+                LEFT JOIN images ON books.image_id = images.id
+                where books.id = ?`, [bookId], (err, row) => {
+                    if (err) return reject(err);
+                    resolve(row);
+                }
+            )});
+            console.log(book);
+            res.status(201).json(book);
         } catch (error) {
             console.error("Ошибка при добавлении книги:", error);
             res.status(500).json({ message: "Ошибка при добавлении книги" });
@@ -212,7 +226,8 @@ app.post('/create', authenticateToken, async (req, res) => {
 
 app.put('/edit/:id', authenticateToken, async (req, res) => {
     const bookId = req.params.id;
-    const { title, author, genre, description, image } = req.body;
+    const { title, author, genre, description, image, file
+     } = req.body;
 
     if (req.user && req.user.role === 'admin') {
         if (!title || !author || !genre || !description || !image) {
