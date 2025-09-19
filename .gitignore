@@ -34,3 +34,6 @@ dist-ssr
 .env.test.local
 .env.production.local
 /packages
+
+*.sqlite
+*.db
